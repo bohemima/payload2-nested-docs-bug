@@ -1,42 +1,36 @@
-# Payload Blank Template
+# Payload nested-docs plugin bug
 
-A blank template for [Payload](https://github.com/payloadcms/payload) to help you get up and running quickly. This repo may have been created by running `npx create-payload-app@latest` and selecting the "blank" template or by cloning this template on [Payload Cloud](https://payloadcms.com/new/clone/blank).
+## Background:
 
-See the official [Examples Directory](https://github.com/payloadcms/payload/tree/main/examples) for details on how to use Payload in a variety of different ways.
+nested-docs plugin is used to create a hierarchy of `tenants`, tenants can "own" `contacts`, a tenant should be able to see contacts for all sub-tenants.
 
-## Development
+## Set up
 
-To spin up the project locally, follow these steps:
+- Copy .env.example to .env
+- Run `docker compose up`
 
-1. First clone the repo
-1. Then `cd YOUR_PROJECT_REPO && cp .env.example .env`
-1. Next `yarn && yarn dev` (or `docker-compose up`, see [Docker](#docker))
-1. Now `open http://localhost:3000/admin` to access the admin panel
-1. Create your first admin user using the form on the page
+Two tenants and two contacts will automatically be created.
 
-That's it! Changes made in `./src` will be reflected in your app.
+## The bug
 
-### Docker
+Try to filter contacts based on `tenant.breadcrumbs.doc` to only get contacts that we should be able to see.
 
-Alternatively, you can use [Docker](https://www.docker.com) to spin up this project locally. To do so, follow these steps:
+http://localhost:3000/api/contacts?where[tenant.breadcrumbs.doc][in]=_tenant1-id_
 
-1. Follow [steps 1 and 2 from above](#development), the docker-compose file will automatically use the `.env` file in your project root
-1. Next run `docker-compose up`
-1. Follow [steps 4 and 5 from above](#development) to login and create your first admin user
+Observe that the SQL statement tries to reference the `tenants` table in the `ON clause` instead of using the table alias. Thus throwing an error.
 
-That's it! The Docker instance will help you get up and running quickly while also standardizing the development environment across your teams.
+> invalid reference to FROM-clause entry for table "tenants" at character 593
+>
+> Perhaps you meant to reference the table alias "1b937a69_0449_4ff5_895f_fec5beffd239".
 
-## Production
-
-To run Payload in production, you need to build and serve the Admin panel. To do so, follow these steps:
-
-1. First invoke the `payload build` script by running `yarn build` or `npm run build` in your project root. This creates a `./build` directory with a production-ready admin bundle.
-1. Then run `yarn serve` or `npm run serve` to run Node in production and serve Payload from the `./build` directory.
-
-### Deployment
-
-The easiest way to deploy your project is to use [Payload Cloud](https://payloadcms.com/new/import), a one-click hosting solution to deploy production-ready instances of your Payload apps directly from your GitHub repo. You can also deploy your app manually, check out the [deployment documentation](https://payloadcms.com/docs/production/deployment) for full details.
-
-## Questions
-
-If you have any issues or questions, reach out to us on [Discord](https://discord.com/invite/payload) or start a [GitHub discussion](https://github.com/payloadcms/payload/discussions).
+```sql
+select distinct "contacts"."id", "contacts"."created_at", "670f15a0-8bd5-4182-b3ea-8fd4c2877452"."path", "6d2c7211-9788-4f6a-b473-cde127ba3165"."path"
+from "contacts"
+left join "contacts_rels" "670f15a0-8bd5-4182-b3ea-8fd4c2877452" on ("contacts"."id" = "670f15a0-8bd5-4182-b3ea-8fd4c2877452"."parent_id" and "670f15a0-8bd5-4182-b3ea-8fd4c2877452"."path" like $1)
+left join "tenants" "1b937a69_0449_4ff5_895f_fec5beffd239" on "1b937a69_0449_4ff5_895f_fec5beffd239"."id" = "670f15a0-8bd5-4182-b3ea-8fd4c2877452"."tenants_id"
+left join "tenants_rels" "6d2c7211-9788-4f6a-b473-cde127ba3165" on ("tenants"."id" = "6d2c7211-9788-4f6a-b473-cde127ba3165"."parent_id" and "6d2c7211-9788-4f6a-b473-cde127ba3165"."path" like $2)
+left join "tenants" "230c0085_8ece_46c2_afb4_ea30a99a5d91" on "230c0085_8ece_46c2_afb4_ea30a99a5d91"."id" = "6d2c7211-9788-4f6a-b473-cde127ba3165"."tenants_id"
+left join "tenants_breadcrumbs" on "tenants"."id" = "tenants_breadcrumbs"."_parent_id"
+where "6d2c7211-9788-4f6a-b473-cde127ba3165"."tenants_id" in ($3)
+order by "contacts"."created_at" desc limit $4
+```
